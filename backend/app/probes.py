@@ -71,8 +71,11 @@ async def _probe_one(client: httpx.AsyncClient, target: Target, host: str) -> tu
     return "down", response.status_code, latency_ms, f"HTTP {response.status_code}"
 
 
-async def _probe_all(registry: Registry) -> list[Result]:
-    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+async def _probe_all(registry: Registry, transport: httpx.AsyncBaseTransport | None = None) -> list[Result]:
+    # transport is a seam for the tests, which drive every branch of the
+    # classification below without a network or a real upstream. Production
+    # passes nothing and gets httpx's default.
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
         # Flatten services and their components into one round of probes so a
         # slow component does not serialise behind its parent.
         flat: list[tuple[Target, Target | None]] = []
@@ -123,11 +126,16 @@ async def _probe_all(registry: Registry) -> list[Result]:
 
 
 class Prober:
-    def __init__(self, registry: Registry) -> None:
+    def __init__(self, registry: Registry, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._registry = registry
+        self._transport = transport
         self._lock = asyncio.Lock()
         self._cached: list[Result] = []
         self._checked_at: float = 0.0
+        # Counts probe cycles, not requests. The cache and the lock exist to
+        # keep this number low when several tabs poll at once, and a test that
+        # cannot see it can only assert on timing.
+        self.cycles = 0
 
     async def status(self, *, force: bool = False) -> tuple[list[Result], float]:
         """Probe results and the wall-clock time they were taken."""
@@ -141,8 +149,9 @@ class Prober:
             if not force and self._cached and (time.time() - self._checked_at) < CACHE_TTL_SECONDS:
                 return self._cached, self._checked_at
 
-            self._cached = await _probe_all(self._registry)
+            self._cached = await _probe_all(self._registry, self._transport)
             self._checked_at = time.time()
+            self.cycles += 1
             return self._cached, self._checked_at
 
 

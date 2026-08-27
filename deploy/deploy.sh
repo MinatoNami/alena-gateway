@@ -5,6 +5,7 @@
 #   ./deploy/deploy.sh              sync, build, start, wire nginx, verify
 #   ./deploy/deploy.sh nginx        reinstall the site and reload, nothing else
 #   ./deploy/deploy.sh routes       check services.yaml and the nginx site agree
+#   ./deploy/deploy.sh test         run the status service's unit tests
 #   ./deploy/deploy.sh verify       probe every route end to end
 #   ./deploy/deploy.sh status       container and endpoint health
 #   ./deploy/deploy.sh logs         tail the status service
@@ -113,6 +114,33 @@ check_routes() {
 
   [ "$missing" -eq 0 ] || die "$missing route(s) declared in services.yaml are not served by nginx"
   ok "services.yaml and the nginx site agree"
+}
+
+# ---------------------------------------------------------------------------- 
+# test — the status service's own unit tests
+# ---------------------------------------------------------------------------- 
+#
+# Local, fast, and no network: the probes run against an httpx MockTransport, so
+# this asserts on the classification, the cache and the API surface without
+# touching a deployment.
+run_tests() {
+  step "Tests"
+
+  local py="python3"
+  [ -x "$LOCAL_DIR/backend/.venv/bin/python" ] && py="$LOCAL_DIR/backend/.venv/bin/python"
+
+  if ! "$py" -m pytest --version >/dev/null 2>&1; then
+    # Not fatal: a deploy from a machine without the dev dependencies should
+    # still work. But say so plainly — tests that quietly stop running are
+    # worse than no tests, because the green output implies they passed.
+    warn "pytest not available, so the unit tests DID NOT RUN"
+    warn "  python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements-dev.txt"
+    TESTS_SKIPPED=1
+    return
+  fi
+
+  ( cd "$LOCAL_DIR/backend" && "$py" -m pytest -q ) || die "tests failed; nothing was deployed"
+  ok "unit tests pass"
 }
 
 # ---------------------------------------------------------------------------- 
@@ -417,6 +445,7 @@ PY
 case "$ACTION" in
   deploy)
     check_routes
+    run_tests
     preflight
     sync_source
     start_stack
@@ -424,12 +453,14 @@ case "$ACTION" in
     configure_serve
     verify
     step "Done"
+    [ -n "${TESTS_SKIPPED:-}" ] && warn "reminder: the unit tests did not run for this deploy"
     printf '\n    %s\n\n' "$ORIGIN"
     ;;
   routes) check_routes ;;
+  test)   run_tests ;;
   nginx)  sync_source; configure_nginx ;;
   verify) verify ;;
   status) status ;;
   logs)   remote "cd ~/$REMOTE_DIR && docker compose logs -f --tail=100 status" ;;
-  *)      die "unknown action: $ACTION (try deploy, nginx, routes, verify, status, logs)" ;;
+  *)      die "unknown action: $ACTION (try deploy, nginx, routes, test, verify, status, logs)" ;;
 esac

@@ -233,15 +233,16 @@ repository is public. `services.yaml` carries a placeholder origin so a fresh
 checkout still parses; `GATEWAY_ORIGIN` in `.env` is what actually applies, and
 `deploy.sh` copies it to the server so a reboot restores the same links.
 
-That checks the registry against the nginx site, syncs the source, builds and
-starts the status service, installs the vhost (rolling back if `nginx -t`
-rejects it), points `tailscale serve` at it, and probes every route over the
-tailnet through real TLS.
+That checks the registry against the nginx site, runs the unit tests, syncs the
+source, builds and starts the status service, installs the vhost (rolling back
+if `nginx -t` rejects it), points `tailscale serve` at it, and probes every
+route over the tailnet through real TLS.
 
 | | |
 |---|---|
 | `./deploy/deploy.sh` | The whole thing. Idempotent — re-running is how you ship a change. |
 | `./deploy/deploy.sh routes` | Registry vs. nginx site. Local, needs no host. |
+| `./deploy/deploy.sh test` | The status service's unit tests. Local, no network. |
 | `./deploy/deploy.sh nginx` | Reinstall the vhost and reload. Nothing else. |
 | `./deploy/deploy.sh verify` | Probe every route end to end, then assert the status page reports every service up. Routing correctly and reporting correctly are different failures. |
 | `./deploy/deploy.sh status` | Containers, then every upstream's health. |
@@ -284,6 +285,45 @@ where this gateway is not deployed.
 There is a window during this sequence where an application is configured for a
 prefix nothing routes yet. Nothing is lost: the iOS app retries its batches, and
 the browser-facing apps are simply unreachable until the gateway deploy lands.
+
+---
+
+## Tests
+
+```bash
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements-dev.txt
+./deploy/deploy.sh test
+```
+
+45 tests, well under a second, no network: the probes run against an httpx
+`MockTransport` keyed by upstream port, so every branch of the classification is
+reachable without a live service. `deploy.sh` runs them before it touches
+anything, and warns loudly rather than failing if pytest is not installed —
+tests that quietly stop running are worse than none, because the green output
+implies they passed.
+
+What they pin down, and why each one is there rather than for coverage:
+
+| | |
+|---|---|
+| **3xx is up** | Both Nuxt apps redirect an unauthenticated visitor to their login page. Classifying a redirect as a failure would have reported two healthy services permanently down. |
+| **A sick component does not sink its parent** | Athena's dashboard being up while its core API is not is precisely the distinction the page exists to show. |
+| **One dead upstream does not hide the others** | The probes are gathered concurrently; a bug in the fan-in would silently truncate the report. |
+| **Concurrent callers share one probe cycle** | Several tabs on a cold cache must not each start a round. The stampede lands hardest when something has just gone down and every probe sits out its full timeout. |
+| **Env origin beats the file** | `services.yaml` carries a placeholder so a real hostname never lands in a public repository. If the file ever won, a redeploy would silently undo that. |
+| **Status is `no-store`** | The page is a live view; a cached copy is worse than useless because it looks current. |
+| **An unknown page renders the status page, still 404** | A wrong path here is usually someone reaching for one of the apps, and the page lists them — but a soft 200 would tell a crawler the page exists. API paths keep JSON. |
+| **An empty registry fails at startup** | The alternative renders nothing, which reads as "all is well" rather than "this is misconfigured". |
+
+The suite was checked by mutation rather than by coverage: inverting the 3xx
+rule, removing the cache lock, reversing the origin precedence, dropping the
+`no-store` header, returning HTML for API 404s, and disabling the empty-registry
+guard each turn it red.
+
+`probes.py` takes an optional `transport` purely as a seam for this, and `Prober`
+counts probe *cycles* rather than requests — a test that cannot see that number
+can only assert on timing, which is how a cache test becomes flaky.
 
 ---
 

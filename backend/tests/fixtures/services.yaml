@@ -1,0 +1,28 @@
+# Registry used by the tests. Deliberately not a copy of the real one: it holds
+# the shapes the code has to cope with — a service with components, one without,
+# a component that is not routed — rather than whatever happens to be deployed.
+origin: https://gateway.example.ts.net/
+upstream_host: placeholder.invalid
+
+services:
+  - id: alpha
+    name: Alpha
+    blurb: A service with a component and reserved root paths.
+    prefix: /alpha/
+    port: 9001
+    health: /healthz
+    repo: alpha-repo
+    reserves: [/v1/, /healthz]
+    components:
+      - id: alpha-core
+        name: Alpha core
+        port: 9002
+        health: /healthz
+        routed: false
+
+  - id: beta
+    name: Beta
+    blurb: A plain service.
+    prefix: /beta/
+    port: 9003
+    health: /
