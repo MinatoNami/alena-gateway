@@ -38,8 +38,10 @@ services:
     repo: health-app
     # Root-level paths this service owns on the gateway. The iOS app already
     # ships with https://<origin>/v1/health/batches compiled in, so /v1 cannot
-    # move without stranding every installed copy.
-    reserves: [/v1/, /healthz, /admin/, /static/]
+    # move without stranding every installed copy — it is the only path here
+    # that is genuinely stuck. The admin and its static tree used to be listed
+    # too and are now under the service prefix; see the nginx site for how.
+    reserves: [/v1/, /healthz]
 
   - id: athena
     name: Athena

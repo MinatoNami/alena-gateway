@@ -343,13 +343,17 @@ verify() {
   # way through — it is a real data endpoint behind a real permission check.
   check /v1/analytics/overview 401,403   "health-app API refuses anonymous"
   check /health-app/         200         "health-app dashboard"
+  # Prefixed, not root. Both of these answered at the origin root until
+  # health-app grew a per-request SCRIPT_NAME; a regression would put them back
+  # there and quietly re-collide with the next Django app on this origin.
+  check /health-app/admin/   200,302     "health-app admin (prefixed)"
+  check /admin/              404         "root /admin is free"
   check /athena/             200,302     "athena"
   check /luma-index/         200,302     "luma-index"
 
   check_relative_redirect /athena     /athena/
   check_relative_redirect /luma-index /luma-index/
   check_relative_redirect /dashboard/ /health-app/
-  check_relative_redirect /icon.svg   /luma-index/icon.svg
 
   [ "$failures" -eq 0 ] || die "$failures route(s) did not answer as expected"
   ok "every route answered"

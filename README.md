@@ -115,24 +115,40 @@ its own routes.
 
 Each is handled at the layer that actually knows the answer.
 
-### health-app — root paths, prefixed shell
+### health-app — one root path, and a per-request script name
 
 The iOS app has `https://<origin>/v1/health/batches` compiled into builds that
-are already on phones. That endpoint cannot move, so health-app's Django keeps
-believing it owns the origin root, and `/v1`, `/healthz`, `/admin` and `/static`
-are reserved for it at the top level.
+are already on phones. That endpoint cannot move, so `/v1` stays at the root and
+`/healthz` beside it.
 
-`FORCE_SCRIPT_NAME` is not an option here: it applies to a whole Django
-instance, so giving the admin a prefix would give the ingest endpoint one too.
+Everything *else* about this app did move, and the mechanism is the interesting
+part. `FORCE_SCRIPT_NAME` cannot help: it applies to a whole Django instance, so
+prefixing the admin with it would prefix the ingest endpoint too. But
+`X-Forwarded-Prefix` can. The gateway strips `/health-app` from the admin routes
+and names it in that header; `ForwardedPrefixMiddleware` turns it into a
+**per-request** `SCRIPT_NAME`, so one instance generates `/health-app/admin/…`
+URLs on those requests while `/v1` keeps generating unprefixed ones. The header
+is honoured only for a prefix in the app's own allowlist, so a client cannot
+send one and choose the action on the admin's login form.
+
+That freed `/admin` and `/static` from the origin root, where they looked shared
+and were not — the second Django app on this origin would have collided with
+both.
+
+Note the asymmetry in the nginx site: the admin is proxied **stripped**, its
+static tree **unstripped**. WhiteNoise matches the request path against
+`STATIC_URL`, which is `/health-app/static/`, and only strips a prefix of its
+own when `FORCE_SCRIPT_NAME` is set — which this app deliberately does not use.
+Strip it there too and every admin stylesheet 404s.
 
 The dashboard is a separate artifact — a static Vite build served straight off
-disk — so it moves independently. Its `base` is now `/health-app/`, and the API
-calls inside it are root-absolute `/v1/…`, which keeps working unchanged because
-`/v1` stayed at the root.
+disk — so it moved independently. Its `base` is `/health-app/`, and the API
+calls inside it are root-absolute `/v1/…`, which keeps working unchanged.
 
 | Change | Where |
 |---|---|
 | `base: '/health-app/'` | `server/dashboard/vite.config.js` |
+| `ForwardedPrefixMiddleware`, allowlisted prefixes | `server/healthserver/settings.py` |
 | Stops installing its own nginx vhost when the gateway is present | `server/deploy.sh` |
 
 ### athena — prefix passed through
@@ -188,12 +204,16 @@ Everything at the root that is not listed here renders the status page.
 
 | Path | Owner | Why it cannot move |
 |---|---|---|
-| `/v1/*` | health-app | Compiled into shipped iOS builds |
+| `/v1/*` | health-app | Compiled into shipped iOS builds. The only genuinely stuck path here. |
 | `/healthz` | health-app | Container healthcheck and `deploy.sh verify` |
-| `/admin/*` | health-app | One script name per Django instance |
-| `/static/*` | health-app | Admin assets, same instance |
-| `/icon.svg`, `/favicon-32.png`, `/apple-touch-icon.png` | luma-index | 301 to the prefixed copies; Nuxt does not rewrite head links |
 | `/api/*` | gateway | The status JSON |
+
+`/admin` and `/static` were on this list and are not any more — health-app's
+per-request `SCRIPT_NAME` moved them under its prefix. `/icon.svg`,
+`/favicon-32.png` and `/apple-touch-icon.png` were here too, redirecting to
+prefixed copies because Nuxt does not rewrite head links from the base path;
+LumaIndex now emits prefixed URLs for them itself, so the redirects were removed
+rather than left as routes nothing reaches.
 
 `services.yaml` is the record of this, and `./deploy/deploy.sh routes` fails if a
 path declared there has no matching `location` in the nginx site.
@@ -351,12 +371,13 @@ could work.
 
 ## Known edges
 
-**LumaIndex's PWA install is disabled under the prefix.** Its
-`manifest.webmanifest` has `start_url` baked in at build time and still reads
-`/`, so installing it would launch the status page instead of the library. The
-gateway does not route the manifest, which turns the install prompt off rather
-than making it lie. Fixing it properly means baking the base path into the build
-— setting `app.baseURL` in `nuxt.config.ts` — and rebuilding the frontend image.
+**LumaIndex's PWA install used to be broken here and is not any more.** Its
+`manifest.webmanifest` was a static file with `start_url` baked in at build
+time, so under a prefix it would have launched the status page instead of the
+library; the gateway left it unrouted rather than let it lie. LumaIndex now
+generates the manifest from a server route that reads the base path, so it is
+correct at whatever prefix the app is served under, and the gateway needs no
+special case for it.
 
 **`X-Forwarded-For` is rewritten, not appended to.** Every application here
 reads the first entry to identify a client, so appending would put a
