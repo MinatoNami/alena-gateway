@@ -1,0 +1,5 @@
+.env
+deploy/.deploy-host
+*.pyc
+__pycache__/
+.venv/

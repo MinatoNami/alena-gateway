@@ -1,0 +1,65 @@
+# alena-gateway — the status service behind the gateway's root path.
+#
+#   docker compose up -d --build
+#
+# nginx is NOT in here. It is the host's own nginx, installed by the package
+# manager and shared with nothing else now that this gateway owns port 443's
+# traffic — running it in a container would mean either host networking (no
+# isolation gained) or publishing a second port to reach the other containers.
+
+name: alena-gateway
+
+services:
+  status:
+    build:
+      context: ./backend
+    image: alena-gateway-status:${GATEWAY_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      GATEWAY_VERSION: ${GATEWAY_IMAGE_TAG:-dev}
+      GATEWAY_SERVICES_FILE: /etc/alena-gateway/services.yaml
+      # Overrides the placeholder in services.yaml. Read from .env on the
+      # server, so a reboot brings the container back with the right links.
+      GATEWAY_ORIGIN: ${GATEWAY_ORIGIN:-}
+      # Overridden here rather than in services.yaml so the same registry file
+      # works when the service is run against tunnelled ports for development.
+      GATEWAY_UPSTREAM_HOST: ${GATEWAY_UPSTREAM_HOST:-127.0.0.1}
+    volumes:
+      # Read-only: this process reports on the estate, it does not edit it.
+      - ./services.yaml:/etc/alena-gateway/services.yaml:ro
+    # Host networking, and it is not incidental.
+    #
+    # Every other application on this box binds 127.0.0.1 — deliberately, so
+    # nothing is reachable off the machine. From inside a bridge network the
+    # probes would leave via the docker bridge and arrive on the host's bridge
+    # address, which those listeners do not accept; the first deploy reported
+    # all three services down for exactly this reason. Sharing the host's
+    # network namespace makes 127.0.0.1 mean the same thing here as it does to
+    # nginx. The alternative — asking each app to bind 0.0.0.0 — would publish
+    # them all to every network the host is on, to make a status page work.
+    #
+    # Linux only. On Docker Desktop this mode does not reach the host, so run
+    # the service directly for local development rather than in compose.
+    network_mode: host
+    # With no network namespace of its own there is no port mapping, so the bind
+    # address is uvicorn's argument rather than docker's. Still loopback: nginx
+    # is the only client and this speaks plaintext.
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - ${GATEWAY_BIND_ADDRESS:-127.0.0.1}
+      - --port
+      - ${GATEWAY_PORT:-8090}
+      - --workers
+      - "1"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${GATEWAY_PORT:-8090}/api/healthz',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

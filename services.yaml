@@ -1,0 +1,69 @@
+# ==============================================================================
+# alena-gateway — the service registry
+# ==============================================================================
+# The one place that knows what is deployed on this host, where it listens, and
+# what URL a person should be given for it. The status backend reads this file
+# to decide what to probe and what to render.
+#
+# It does NOT generate nginx/alena-gateway.conf. Routing rules are hand-written
+# there, because a generated proxy config hides exactly the details — buffering,
+# timeouts, prefix stripping — that make each of these apps work. Keep the two
+# in step by hand; deploy/deploy.sh checks that every `prefix` below has a
+# matching `location` in the nginx config and refuses to ship if one is missing.
+# ==============================================================================
+
+# Public origin, used to build the links shown on the status page. No trailing
+# slash. `tailscale serve` terminates TLS for this name.
+#
+# This is a PLACEHOLDER. The real origin names a specific machine, so it lives
+# in GATEWAY_ORIGIN in .env, which is untracked; deploy.sh reads it from there
+# and keeps the server's copy in step. What is written here is only the fallback
+# for a checkout that has not been configured yet.
+origin: https://alena-server.your-tailnet.ts.net
+
+# Where the probes are aimed. Inside the container `127.0.0.1` is the container
+# itself, so we reach the host through the gateway address docker publishes.
+upstream_host: host.docker.internal
+
+services:
+  - id: health-app
+    name: Health Exporter
+    blurb: Apple Health ingest, analysis, and the dashboard the phone feeds.
+    prefix: /health-app/
+    # The dashboard is a static Vite build on disk, served by nginx from
+    # /var/www/health-dashboard — there is no upstream for it. The port below is
+    # the Django API that both the dashboard and the iOS app talk to.
+    port: 8081
+    health: /healthz
+    repo: health-app
+    # Root-level paths this service owns on the gateway. The iOS app already
+    # ships with https://<origin>/v1/health/batches compiled in, so /v1 cannot
+    # move without stranding every installed copy.
+    reserves: [/v1/, /healthz, /admin/, /static/]
+
+  - id: athena
+    name: Athena
+    blurb: Autonomous security investigation with human-controlled remediation.
+    prefix: /athena/
+    port: 8099
+    # The Nuxt BFF has no health route of its own; a 200 on the app shell is the
+    # signal that both it and its session layer came up.
+    health: /athena/
+    repo: project-athena
+    # Published for diagnostics only and deliberately not routed — the dashboard
+    # reaches core over the compose network. Probed so the page can tell
+    # "the API is down" apart from "the dashboard is down".
+    components:
+      - id: athena-api
+        name: Athena core API
+        port: 8100
+        health: /healthz
+        routed: false
+
+  - id: luma-index
+    name: LumaIndex
+    blurb: Self-hosted PDF library and reader.
+    prefix: /luma-index/
+    port: 8080
+    health: /api/health/
+    repo: luma-index

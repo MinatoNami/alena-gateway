@@ -1,0 +1,187 @@
+/* alena-gateway status page.
+   One column, system fonts, no build step. The page is read on a phone as
+   often as on a desktop and is mostly text, so it is laid out for reading
+   first and decorated second. */
+
+:root {
+  --bg: #f6f7f5;
+  --panel: #ffffff;
+  --ink: #16211c;
+  --ink-soft: #5b6660;
+  --line: #dde2de;
+  --up: #2f6f4e;
+  --down: #a3282b;
+  --accent: #2f6f4e;
+  --focus: #1a5fb4;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121512;
+    --panel: #1b201c;
+    --ink: #e8ede9;
+    --ink-soft: #9aa8a0;
+    --line: #2c332e;
+    --up: #6fcf97;
+    --down: #f08a8c;
+    --accent: #6fcf97;
+    --focus: #7fb3ff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 3rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  max-width: 46rem;
+  margin-inline: auto;
+}
+
+/* Visible only when tabbed to — the first stop for a keyboard user. */
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+.skip:focus {
+  position: static;
+  display: inline-block;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-radius: var(--radius);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.masthead { margin-bottom: 1.75rem; }
+.masthead h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+.origin {
+  margin: 0.15rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.services {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.loading { color: var(--ink-soft); }
+
+.service > article {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.status-up   { color: var(--up); }
+.status-down { color: var(--down); }
+
+.dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+/* The dot repeats what the adjacent word already says, so colour is never the
+   only carrier of the state. */
+
+.name { margin: 0; font-size: 1.15rem; }
+.name-link { color: var(--ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.name-link:hover { color: var(--accent); }
+/* A service that is not routed has no link; it renders as plain text. */
+.name > span { color: var(--ink); }
+
+.blurb {
+  margin: 0.3rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0.8rem 0 0;
+  font-size: 0.85rem;
+}
+.facts dt { color: var(--ink-soft); }
+.facts dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-word;
+}
+.facts .bad { color: var(--down); }
+
+.footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+.footer p { margin: 0.25rem 0; }
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.refresh {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+.refresh:hover { border-color: var(--accent); color: var(--accent); }
+.refresh[disabled] { opacity: 0.55; cursor: default; }
+
+/* Someone who has asked for less motion still gets the state change, just
+   without the transition. */
+@media (prefers-reduced-motion: no-preference) {
+  .service > article { transition: border-color 120ms ease; }
+}
