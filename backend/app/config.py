@@ -34,7 +34,7 @@ class Target:
     repo: str | None = None
     reserves: list[str] = field(default_factory=list)
     # Sub-processes reported underneath a service rather than beside it.
-    components: list["Target"] = field(default_factory=list)
+    components: list[Target] = field(default_factory=list)
 
     def health_url(self, host: str) -> str:
         return f"http://{host}:{self.port}{self.health_path}"
@@ -77,6 +77,9 @@ def load(path: Path | None = None) -> Registry:
         # one. Reversing this precedence would put a specific machine's name in
         # a tracked file, which is how it leaks into a public repository.
         origin=(os.environ.get("GATEWAY_ORIGIN") or raw["origin"]).rstrip("/"),
-        upstream_host=os.environ.get("GATEWAY_UPSTREAM_HOST") or raw.get("upstream_host", "host.docker.internal"),
+        upstream_host=(
+            os.environ.get("GATEWAY_UPSTREAM_HOST")
+            or raw.get("upstream_host", "host.docker.internal")
+        ),
         services=[_target(s) for s in services],
     )

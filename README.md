@@ -246,6 +246,7 @@ route over the tailnet through real TLS.
 | `./deploy/deploy.sh nginx` | Reinstall the vhost and reload. Nothing else. |
 | `./deploy/deploy.sh verify` | Probe every route end to end, then assert the status page reports every service up. Routing correctly and reporting correctly are different failures. |
 | `./deploy/deploy.sh status` | Containers, then every upstream's health. |
+| `./deploy/deploy.sh rollback` | List the images on the server. Add a tag to pin one. |
 | `./deploy/deploy.sh logs` | Tail the status service. |
 
 ### Order matters on the first deploy
@@ -324,6 +325,51 @@ guard each turn it red.
 `probes.py` takes an optional `transport` purely as a seam for this, and `Prober`
 counts probe *cycles* rather than requests — a test that cannot see that number
 can only assert on timing, which is how a cache test becomes flaky.
+
+---
+
+## Rollback
+
+```bash
+./deploy/deploy.sh rollback              # what is on the server
+./deploy/deploy.sh rollback 983f7a2      # pin that one, then verify
+```
+
+Images are tagged by commit and kept on the server, so the previous few releases
+are always there. The status service holds no state, which is what makes this a
+complete rollback *of that service* — it re-runs the old image and then runs the
+full verification pass before claiming anything.
+
+**It does not revert the nginx site**, and the command says so rather than
+implying otherwise. Routing is installed from the working tree, not baked into
+the image, so a bad route is undone by checking the file out and reinstalling:
+
+```bash
+git checkout <tag> -- nginx/ services.yaml && ./deploy/deploy.sh nginx
+```
+
+An invalid site config cannot get that far — `deploy.sh` restores the previous
+one and reloads nothing if `nginx -t` rejects it. This is for the config that is
+valid and wrong.
+
+---
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request, in four jobs.
+
+| | |
+|---|---|
+| **backend** | ruff, then pytest — on Python 3.12, matching `backend/Dockerfile`. Testing on a newer interpreter than production runs is how a deprecation becomes a deploy-time surprise. |
+| **nginx** | `nginx -t` against the site inside `nginx:1.24`, the version the server runs, plus the registry-vs-site agreement check. |
+| **shell** | ShellCheck on `deploy/deploy.sh`. |
+| **compose** | `docker compose config`. |
+
+The last three exist because the two bugs that reached production here were an
+nginx directive and a compose networking mistake — neither of them something a
+Python test can see. The nginx image is pinned rather than floating: a directive
+can be valid in 1.27 and unknown in 1.24, which would pass CI and then fail on
+the reload that matters.
 
 ---
 

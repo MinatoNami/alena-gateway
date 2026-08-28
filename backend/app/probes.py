@@ -47,7 +47,9 @@ class Result:
     components: list[dict]
 
 
-async def _probe_one(client: httpx.AsyncClient, target: Target, host: str) -> tuple[str, int | None, int | None, str | None]:
+async def _probe_one(
+    client: httpx.AsyncClient, target: Target, host: str
+) -> tuple[str, int | None, int | None, str | None]:
     """Return (status, http_status, latency_ms, detail) for one target."""
     url = target.health_url(host)
     started = time.perf_counter()
@@ -56,11 +58,13 @@ async def _probe_one(client: httpx.AsyncClient, target: Target, host: str) -> tu
         # it lives somewhere else is information, not something to chase.
         response = await client.get(url)
     except httpx.TimeoutException:
-        return "down", None, int((time.perf_counter() - started) * 1000), f"no response in {TIMEOUT_SECONDS:g}s"
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return "down", None, elapsed_ms, f"no response in {TIMEOUT_SECONDS:g}s"
     except httpx.HTTPError as exc:
         # Connection refused is the ordinary case for a stopped container, and
         # httpx's own message for it is more useful than anything we'd write.
-        return "down", None, None, type(exc).__name__ + (f": {exc}" if str(exc) else "")
+        detail = type(exc).__name__ + (f": {exc}" if str(exc) else "")
+        return "down", None, None, detail
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
@@ -71,7 +75,9 @@ async def _probe_one(client: httpx.AsyncClient, target: Target, host: str) -> tu
     return "down", response.status_code, latency_ms, f"HTTP {response.status_code}"
 
 
-async def _probe_all(registry: Registry, transport: httpx.AsyncBaseTransport | None = None) -> list[Result]:
+async def _probe_all(
+    registry: Registry, transport: httpx.AsyncBaseTransport | None = None
+) -> list[Result]:
     # transport is a seam for the tests, which drive every branch of the
     # classification below without a network or a real upstream. Production
     # passes nothing and gets httpx's default.
@@ -88,7 +94,12 @@ async def _probe_all(registry: Registry, transport: httpx.AsyncBaseTransport | N
             *(_probe_one(client, target, registry.upstream_host) for target, _ in flat)
         )
 
-    by_id = {target.id: outcome for (target, _), outcome in zip(flat, outcomes)}
+    # strict=True: these are built from the same list, so a length mismatch is a
+    # bug — and zip's default would quietly truncate the report rather than say so.
+    by_id = {
+        target.id: outcome
+        for (target, _), outcome in zip(flat, outcomes, strict=True)
+    }
 
     results: list[Result] = []
     for service in registry.services:
@@ -103,7 +114,11 @@ async def _probe_all(registry: Registry, transport: httpx.AsyncBaseTransport | N
                 detail=detail,
                 port=service.port,
                 routed=service.routed,
-                url=f"{registry.origin}{service.prefix}" if service.routed and service.prefix else None,
+                url=(
+                    f"{registry.origin}{service.prefix}"
+                    if service.routed and service.prefix
+                    else None
+                ),
                 blurb=service.blurb,
                 repo=service.repo,
                 reserves=service.reserves,
@@ -126,7 +141,9 @@ async def _probe_all(registry: Registry, transport: httpx.AsyncBaseTransport | N
 
 
 class Prober:
-    def __init__(self, registry: Registry, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self, registry: Registry, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         self._registry = registry
         self._transport = transport
         self._lock = asyncio.Lock()

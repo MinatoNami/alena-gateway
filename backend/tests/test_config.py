@@ -3,10 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import FIXTURE
 
 from app import config
-
-from conftest import FIXTURE
 
 
 def test_reads_the_registry(registry):

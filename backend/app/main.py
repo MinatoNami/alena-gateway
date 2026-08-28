@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -43,7 +43,7 @@ async def status(response: Response) -> JSONResponse:
     # polling from reaching the upstreams.
     return JSONResponse(
         {
-            "generated_at": datetime.fromtimestamp(checked_at, timezone.utc).isoformat(),
+            "generated_at": datetime.fromtimestamp(checked_at, UTC).isoformat(),
             "origin": registry.origin,
             "gateway": {
                 "version": VERSION,

@@ -1,0 +1,14 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = [
+    "S101",  # assert — the test suite is built on it
+]
+
+[lint.per-file-ignores]
+# The tests reach for private helpers on purpose: _probe_all is where the
+# classification lives, and testing it through the cache would make every
+# assertion about status codes also an assertion about the cache.
+"tests/*" = ["S101"]

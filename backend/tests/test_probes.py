@@ -4,11 +4,10 @@ import asyncio
 
 import httpx
 import pytest
+from conftest import responder
 
 from app import probes
 from app.probes import Prober
-
-from conftest import responder
 
 ALPHA, ALPHA_CORE, BETA = 9001, 9002, 9003
 

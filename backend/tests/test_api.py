@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from conftest import responder
 from fastapi.testclient import TestClient
 
 from app import main
-
-from conftest import responder
 
 ALPHA, ALPHA_CORE, BETA = 9001, 9002, 9003
 

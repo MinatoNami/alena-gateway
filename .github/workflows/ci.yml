@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Matches backend/Dockerfile. Testing on a newer interpreter than
+          # production runs is how a deprecation becomes a surprise at deploy.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: python -m pytest -q
+
+  # The two bugs that reached production here were an nginx directive and a
+  # compose networking mistake. Neither is something pytest can see, so they get
+  # their own jobs.
+  nginx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Site config is valid
+        # Pinned to the version the server runs. `nginx -t` is version-sensitive
+        # — a directive can be valid in 1.27 and unknown in 1.24, which would
+        # pass here and fail on the reload that matters.
+        run: |
+          docker run --rm \
+            -v "$PWD/nginx/alena-gateway.conf:/etc/nginx/conf.d/alena-gateway.conf:ro" \
+            -v "$PWD/nginx/snippets/alena-gateway-proxy.conf:/etc/nginx/snippets/alena-gateway-proxy.conf:ro" \
+            nginx:1.24 nginx -t
+
+      - name: Registry and site agree
+        # The failure this catches is a status page that cheerfully links to a
+        # path nginx does not serve.
+        run: ./deploy/deploy.sh routes
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        # deploy.sh is the only thing that touches the live host, and every
+        # safety mechanism in it — the nginx rollback, the :443 guard, the probe
+        # assertion — is shell. A bug in those fails open.
+        run: shellcheck -S warning deploy/deploy.sh
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid
+        # GATEWAY_ORIGIN is normally supplied from the untracked .env; compose
+        # interpolates it at parse time, so give it something to read.
+        run: GATEWAY_ORIGIN=https://ci.example.ts.net docker compose config >/dev/null

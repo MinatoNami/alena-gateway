@@ -8,6 +8,7 @@
 #   ./deploy/deploy.sh test         run the status service's unit tests
 #   ./deploy/deploy.sh verify       probe every route end to end
 #   ./deploy/deploy.sh status       container and endpoint health
+#   ./deploy/deploy.sh rollback     list images; rollback <tag> to pin one
 #   ./deploy/deploy.sh logs         tail the status service
 #
 # Idempotent throughout: re-running is the normal way to ship a change.
@@ -57,7 +58,9 @@ while [ $# -gt 0 ]; do
     --host) SSH_HOST="${2:-}"; shift 2 ;;
     --host=*) SSH_HOST="${1#*=}"; shift ;;
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) ACTION="$1"; shift ;;
+    *)
+      if [ -z "$ACTION" ]; then ACTION="$1"; else ROLLBACK_TAG="$1"; fi
+      shift ;;
   esac
 done
 ACTION="${ACTION:-deploy}"
@@ -407,6 +410,56 @@ PY
   ok "every service probes up"
 }
 
+# ---------------------------------------------------------------------------- 
+# rollback — put a previous status-service image back
+# ---------------------------------------------------------------------------- 
+#
+# Scope is deliberately narrow, and the script says so rather than implying it
+# reverted everything. The status service is stateless, so re-running an older
+# image is a complete rollback *of that service*. The nginx site is not in the
+# image: it is installed from the working tree, so reverting a routing mistake
+# means checking the file out and reinstalling it. Both are printed below.
+rollback() {
+  require_host
+
+  local target="${1:-}"
+  local available
+  available="$(remote "docker images alena-gateway-status --format '{{.Tag}}\t{{.CreatedAt}}'" | grep -v '<none>')"
+
+  if [ -z "$available" ]; then
+    die "no alena-gateway-status images on $SSH_HOST to roll back to"
+  fi
+
+  if [ -z "$target" ]; then
+    step "Images on $SSH_HOST"
+    printf '%s\n' "$available" | sed 's/^/    /'
+    printf '\n    Pick one:  ./deploy/deploy.sh rollback <tag>\n'
+    printf '    The nginx site is separate:\n'
+    printf '      git checkout <tag> -- nginx/ services.yaml && ./deploy/deploy.sh nginx\n\n'
+    return
+  fi
+
+  printf '%s\n' "$available" | awk '{print $1}' | grep -qx "$target" \
+    || die "no image tagged '$target' on $SSH_HOST. Run rollback with no argument to list them."
+
+  step "Rollback"
+  warn "this reverts the status service image only, not the nginx site"
+  remote "cd ~/$REMOTE_DIR && GATEWAY_IMAGE_TAG=$target docker compose up -d --no-build" >/dev/null
+  ok "status service pinned to $target"
+
+  local port waited=0
+  port="$(remote "grep -E '^GATEWAY_PORT=' ~/$REMOTE_DIR/.env | cut -d= -f2" 2>/dev/null || true)"
+  port="${port:-8090}"
+  until remote "curl -fsS -m3 http://127.0.0.1:$port/api/healthz >/dev/null 2>&1"; do
+    waited=$((waited + 2))
+    [ "$waited" -lt 40 ] || die "the rolled-back image did not answer within 40s"
+    sleep 2
+  done
+  ok "answering on 127.0.0.1:$port"
+
+  verify
+}
+
 status() {
   step "Containers"
   remote "cd ~/$REMOTE_DIR && docker compose ps" || true
@@ -461,6 +514,7 @@ case "$ACTION" in
   nginx)  sync_source; configure_nginx ;;
   verify) verify ;;
   status) status ;;
+  rollback) rollback "${ROLLBACK_TAG:-}" ;;
   logs)   remote "cd ~/$REMOTE_DIR && docker compose logs -f --tail=100 status" ;;
-  *)      die "unknown action: $ACTION (try deploy, nginx, routes, test, verify, status, logs)" ;;
+  *)      die "unknown action: $ACTION (try deploy, nginx, routes, test, verify, status, rollback, logs)" ;;
 esac
